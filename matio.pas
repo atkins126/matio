@@ -12,9 +12,11 @@ interface
 ////////////////////////////////////////////////////////////////////////////////
 
 Uses
-  System.Classes,System.SysUtils,System.IOUtils,System.Types,PropSet;
+  System.Classes, System.SysUtils, System.IOUtils, System.Types, PropSet, ArrayVal;
 
 Type
+  TFloatType = (ftFloat16,ftFloat32,ftFloat64);
+
   TFloat32MatrixRow = TArray<Float32>;
   TFloat64MatrixRow = TArray<Float64>;
   TMatrixRow = TFloat64MatrixRow;
@@ -29,6 +31,9 @@ Type
     Procedure Init(Count,Size: Integer);
     Function GetValues(Matrix,Column: Integer): Float64; virtual; abstract;
     Procedure SetValues(Matrix,Column: Integer; Value: Float64); virtual; abstract;
+  public
+    Procedure GetRow(Matrix: Integer; var Row: TFloat32MatrixRow); overload;
+    Procedure GetRow(Matrix: Integer; var Row: TFloat64MatrixRow); overload;
   public
     Property Count: Integer read FCount;
     Property Size: Integer read FSize;
@@ -47,6 +52,7 @@ Type
     Constructor Create; overload;
     Constructor Create(Count,Size: Integer); overload;
     Procedure Allocate(Count,Size: Integer);
+    Function RowValues(Matrix: Integer): TFloat64ArrayValues;
   end;
 
   TFloat32MatrixRows = Class(TCustomMatrixRows)
@@ -59,6 +65,7 @@ Type
     Constructor Create; overload;
     Constructor Create(Count,Size: Integer); overload;
     Procedure Allocate(Count,Size: Integer);
+    Function RowValues(Matrix: Integer): TFloat32ArrayValues;
   end;
 
   TMatrixFiler = Class
@@ -83,6 +90,7 @@ Type
       FileProperty = 'file';
       FormatProperty = 'format';
     Class Function Format: String; virtual; abstract;
+    Class Function Available: Boolean; virtual;
     Class Function FormatProperties(ReadOnly: Boolean = true): TPropertySet;
     Class Function PropertyPickList(const PropertyName: string; out PickList: TStringDynArray): Boolean; virtual;
     Class Function TidyProperties(const [ref] Properties: TPropertySet; ReadOnly: Boolean = true): TPropertySet;
@@ -125,7 +133,7 @@ Type
   TMatrixWriter = Class(TMatrixFiler)
   // TMatrixWriter is the abstract base class for all format specific matrix writer objects
   strict protected
-    Constructor Create(const FileName: String; const Count,Size: Integer); overload;
+    Constructor Create(const FileName: String; const Count,Size: Integer; const CreateStream: Boolean = true); overload;
     Procedure Write(const CurrentRow: Integer; const Rows: TCustomMatrixRows); overload; virtual; abstract;
   public
     Class Var
@@ -141,6 +149,9 @@ Type
     Procedure Write(const Rows: array of TFloat32MatrixRow); overload;
     Procedure Write(const Rows: TCustomMatrixRows); overload;
   end;
+
+Const
+  PrecisionLabels: array[TFloatType] of String = ('float16','float32','float64');
 
 ////////////////////////////////////////////////////////////////////////////////
 implementation
@@ -165,6 +176,26 @@ Procedure TCustomMatrixRows.Init(Count,Size: Integer);
 begin
   FCount := Count;
   FSize := Size;
+end;
+
+Procedure TCustomMatrixRows.GetRow(Matrix: Integer; var Row: TFloat32MatrixRow);
+begin
+  if FSize < Length(Row) then
+  begin
+    for var Column := 0 to FSize-1 do Row[Column] := DoGetValues(Matrix,Column);
+    for var Column := FSize to Length(Row)-1 do Row[Column] := 0.0;
+  end else
+    for var Column := 0 to Length(Row)-1 do Row[Column] := DoGetValues(Matrix,Column);
+end;
+
+Procedure TCustomMatrixRows.GetRow(Matrix: Integer; var Row: TFloat64MatrixRow);
+begin
+  if FSize < Length(Row) then
+  begin
+    for var Column := 0 to FSize-1 do Row[Column] := DoGetValues(Matrix,Column);
+    for var Column := FSize to Length(Row)-1 do Row[Column] := 0.0;
+  end else
+    for var Column := 0 to Length(Row)-1 do Row[Column] := DoGetValues(Matrix,Column);
 end;
 
 Function TCustomMatrixRows.Total: Float64;
@@ -208,6 +239,11 @@ begin
   SetLength(FValues,Count,Size);
 end;
 
+Function TFloat64MatrixRows.RowValues(Matrix: Integer): TFloat64ArrayValues;
+begin
+  Result := TFloat64ArrayValues.Create(FValues[Matrix])
+end;
+
 ////////////////////////////////////////////////////////////////////////////////
 
 Constructor TFloat32MatrixRows.Create;
@@ -237,7 +273,17 @@ begin
   SetLength(FValues,Count,Size);
 end;
 
+Function TFloat32MatrixRows.RowValues(Matrix: Integer): TFloat32ArrayValues;
+begin
+  Result := TFloat32ArrayValues.Create(FValues[Matrix])
+end;
+
 ////////////////////////////////////////////////////////////////////////////////
+
+Class Function TMatrixFiler.Available: Boolean;
+begin
+  Result := true;
+end;
 
 Class Function TMatrixFiler.FormatProperties(ReadOnly: Boolean = true): TPropertySet;
 begin
@@ -432,10 +478,12 @@ end;
 ////////////////////////////////////////////////////////////////////////////////
 
 Constructor TMatrixWriter.Create(const FileName: String;
-                                 const Count,Size: Integer);
+                                 const Count,Size: Integer;
+                                 const CreateStream: Boolean = true);
 begin
   inherited Create;
   FFileName := ExpandFileName(FileName);
+  if CreateStream then
   FileStream := TBufferedFileStream.Create(FFileName,fmCreate or fmShareDenyWrite,BufferSize);
   SetCount(Count);
   SetSize(Size);
